@@ -13,6 +13,9 @@ class ConnectionManager {
     this.onNodeStatusChange = null;
     this.websimConnectionStatus = 'disconnected';
     this.databaseConnectionStatus = 'disconnected';
+    this.nodeReconnectTimers = {};
+    this.nodeReconnectAttempts = {};
+    this.deadSignals = {};
   }
 
   async init() {
@@ -37,6 +40,9 @@ class ConnectionManager {
     
     // Load known nodes
     await this.loadKnownNodes();
+    
+    // Check for dead signals in the database
+    await this.loadDeadSignals();
     
     // If P2P is initialized, try to connect to known nodes
     if (p2pInitialized && this.knownNodes.length > 0) {
@@ -172,9 +178,21 @@ class ConnectionManager {
   }
   
   updateNodeStatus(nodeId, status) {
+    const previousStatus = this.nodeStatuses[nodeId];
     this.nodeStatuses[nodeId] = status;
+    
     if (this.onNodeStatusChange) {
       this.onNodeStatusChange(nodeId, status);
+    }
+    
+    // If node goes from connected to disconnected, start reconnection attempt cycle
+    if (previousStatus === 'connected' && status === 'disconnected') {
+      this.startNodeReconnection(nodeId);
+    }
+    
+    // If a dead node comes back to life, clear its dead signal
+    if (previousStatus === 'dead' && (status === 'connected' || status === 'connecting')) {
+      delete this.deadSignals[nodeId];
     }
   }
   
@@ -740,7 +758,8 @@ wss.on('connection', (ws) => {
       console.log(\`Database: In-Memory (No Database)\`);
     });
   }
-})();`,
+})();
+`,
       'package.json': `{
   "name": "safespace-node",
   "version": "1.0.0",
@@ -809,3 +828,125 @@ Note: The URL will change each time you restart ngrok unless you have a paid acc
     return filesContent;
   }
 }
+
+  async loadDeadSignals() {
+    try {
+      // Load dead signals from WebSim database
+      const signals = this.room.collection('nodeDeadSignal').getList();
+      if (signals && signals.length > 0) {
+        // Process dead signals
+        for (const signal of signals) {
+          // Check if the signal is still valid (not expired)
+          if (signal.endTime && new Date(signal.endTime) > new Date()) {
+            this.deadSignals[signal.nodeId] = signal;
+          }
+        }
+      }
+      
+      // Subscribe to dead signals
+      this.room.collection('nodeDeadSignal').subscribe((signals) => {
+        // Update dead signals
+        const updatedDeadSignals = {};
+        for (const signal of signals) {
+          // Only store valid dead signals
+          if (signal.endTime && new Date(signal.endTime) > new Date()) {
+            updatedDeadSignals[signal.nodeId] = signal;
+          }
+        }
+        this.deadSignals = updatedDeadSignals;
+        
+        // Update node statuses based on dead signals
+        this.updateNodeStatusesFromDeadSignals();
+      });
+    } catch (error) {
+      console.error('Failed to load dead signals:', error);
+    }
+  }
+  
+  updateNodeStatusesFromDeadSignals() {
+    // Check each known node against dead signals
+    for (const node of this.knownNodes) {
+      if (this.deadSignals[node.id]) {
+        // If there's a valid dead signal for this node, mark it as dead
+        this.updateNodeStatus(node.id, 'dead');
+        
+        // Clear any reconnection timers for dead nodes
+        if (this.nodeReconnectTimers[node.id]) {
+          clearTimeout(this.nodeReconnectTimers[node.id]);
+          delete this.nodeReconnectTimers[node.id];
+          delete this.nodeReconnectAttempts[node.id];
+        }
+      }
+    }
+  }
+
+  startNodeReconnection(nodeId) {
+    // Initialize reconnection attempts counter
+    if (!this.nodeReconnectAttempts[nodeId]) {
+      this.nodeReconnectAttempts[nodeId] = 0;
+    }
+    
+    // Clear any existing timer
+    if (this.nodeReconnectTimers[nodeId]) {
+      clearTimeout(this.nodeReconnectTimers[nodeId]);
+    }
+    
+    // Only try to reconnect if not in dead state
+    if (this.nodeStatuses[nodeId] !== 'dead') {
+      this.attemptNodeReconnection(nodeId);
+    }
+  }
+  
+  attemptNodeReconnection(nodeId) {
+    // Increment attempt counter
+    this.nodeReconnectAttempts[nodeId] = (this.nodeReconnectAttempts[nodeId] || 0) + 1;
+    
+    // If we've tried 10 times, timeout for 2 minutes before trying again
+    if (this.nodeReconnectAttempts[nodeId] > 10) {
+      console.log(`Timeout after 10 reconnection attempts to node ${nodeId}, will try again in 2 minutes`);
+      this.nodeReconnectAttempts[nodeId] = 0;
+      this.nodeReconnectTimers[nodeId] = setTimeout(() => {
+        this.attemptNodeReconnection(nodeId);
+      }, 2 * 60 * 1000); // 2 minutes
+      return;
+    }
+    
+    // Try to reconnect
+    console.log(`Attempting to reconnect to node ${nodeId} (attempt ${this.nodeReconnectAttempts[nodeId]})`);
+    const node = this.knownNodes.find(n => n.id === nodeId);
+    
+    if (node) {
+      this.updateNodeStatus(nodeId, 'connecting');
+      this.p2pManager.connectToNode(node)
+        .then(connected => {
+          if (!connected) {
+            // If connection fails, schedule next attempt in 7 seconds
+            this.updateNodeStatus(nodeId, 'disconnected');
+            this.nodeReconnectTimers[nodeId] = setTimeout(() => {
+              this.attemptNodeReconnection(nodeId);
+            }, 7000); // 7 seconds
+          } else {
+            // Connected successfully, reset counter
+            this.nodeReconnectAttempts[nodeId] = 0;
+          }
+        })
+        .catch(error => {
+          console.error(`Error reconnecting to node ${nodeId}:`, error);
+          this.updateNodeStatus(nodeId, 'disconnected');
+          this.nodeReconnectTimers[nodeId] = setTimeout(() => {
+            this.attemptNodeReconnection(nodeId);
+          }, 7000); // 7 seconds
+        });
+    }
+  }
+  
+  checkForDeadSignal(nodeId) {
+    return this.deadSignals[nodeId] !== undefined;
+  }
+  
+  verifyDeadSignal(signal) {
+    // In a real implementation, this would verify the signature
+    // For now, we're just checking if the signal has the required fields
+    return signal && signal.nodeId && signal.verificationHash && 
+           signal.startTime && (signal.endTime || signal.permanent);
+  }

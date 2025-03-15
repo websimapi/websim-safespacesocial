@@ -27,6 +27,13 @@ class P2PManager {
       return false;
     }
     
+    // Check if the node has a dead signal
+    if (this.connectionManager.checkForDeadSignal(nodeInfo.id)) {
+      console.log(`Not connecting to node ${nodeInfo.id} because it has a dead signal`);
+      this.connectionManager.updateNodeStatus(nodeInfo.id, 'dead');
+      return false;
+    }
+    
     try {
       // Create a connection to the node
       const nodeConnection = new WebSocket(nodeInfo.wsUrl);
@@ -55,6 +62,12 @@ class P2PManager {
             break;
           case 'newPeer':
             await this.initiatePeerConnection(message.peerId, true, nodeInfo.id);
+            break;
+          case 'deadSignal':
+            // Handle dead signal from node
+            if (this.connectionManager.verifyDeadSignal(message.signal)) {
+              await this.handleNodeDeadSignal(message.signal);
+            }
             break;
         }
       };
@@ -190,5 +203,29 @@ class P2PManager {
     }
     this.nodeConnections = {};
   }
-}
 
+  async handleNodeDeadSignal(signal) {
+    // Store the dead signal in WebSim database
+    try {
+      await this.connectionManager.room.collection('nodeDeadSignal').create({
+        nodeId: signal.nodeId,
+        verificationHash: signal.verificationHash,
+        startTime: signal.startTime,
+        endTime: signal.endTime,
+        permanent: signal.permanent || false,
+        message: signal.message || 'Node is offline'
+      });
+      
+      // Update node status
+      this.connectionManager.updateNodeStatus(signal.nodeId, 'dead');
+      
+      // Close connection if open
+      if (this.nodeConnections[signal.nodeId]) {
+        this.nodeConnections[signal.nodeId].close();
+        delete this.nodeConnections[signal.nodeId];
+      }
+    } catch (error) {
+      console.error('Failed to store dead signal:', error);
+    }
+  }
+}

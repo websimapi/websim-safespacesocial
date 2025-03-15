@@ -11,7 +11,8 @@ function App() {
   const [newPostContent, setNewPostContent] = useState('');
   const [newNodeInfo, setNewNodeInfo] = useState({ id: '', wsUrl: '', name: '' });
   const [addingNode, setAddingNode] = useState(false);
-  
+  const [deadNodes, setDeadNodes] = useState({});
+
   // Initialize the connection manager
   useEffect(() => {
     const init = async () => {
@@ -128,7 +129,10 @@ function App() {
           {Object.entries(nodeStatuses).map(([nodeId, status]) => (
             <div className="status-item" key={nodeId}>
               <span className={`status-indicator ${status}`}></span>
-              <span>{connectionManager.knownNodes.find(n => n.id === nodeId)?.name || nodeId}</span>
+              <span>
+                {connectionManager.knownNodes.find(n => n.id === nodeId)?.name || nodeId}
+                {status === 'dead' && ' (Dead)'}
+              </span>
             </div>
           ))}
         </div>
