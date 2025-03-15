@@ -342,6 +342,11 @@ class ConnectionManager {
 const http = require('http');
 const express = require('express');
 const cors = require('cors');
+const readline = require('readline');
+const { exec } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 
 const app = express();
 app.use(cors());
@@ -364,10 +369,205 @@ const nodeInfo = {
   name: 'SafeSpace Node'
 };
 
+// Database configuration
+let db = null;
+let dbType = '';
+
+// Database adapters
+const dbAdapters = {
+  sqlite: {
+    name: 'SQLite',
+    dependencies: ['sqlite3', 'sequelize'],
+    init: async () => {
+      const { Sequelize, DataTypes } = require('sequelize');
+      const sequelize = new Sequelize({
+        dialect: 'sqlite',
+        storage: path.join(__dirname, 'safespace.sqlite')
+      });
+      
+      // Define models
+      const Post = sequelize.define('Post', {
+        id: {
+          type: DataTypes.STRING,
+          primaryKey: true
+        },
+        content: DataTypes.TEXT,
+        username: DataTypes.STRING,
+        timestamp: DataTypes.DATE
+      });
+      
+      await sequelize.sync();
+      
+      return {
+        getPosts: async () => {
+          return await Post.findAll({ order: [['timestamp', 'DESC']], raw: true });
+        },
+        addPost: async (post) => {
+          return await Post.create(post);
+        }
+      };
+    }
+  },
+  mongodb: {
+    name: 'MongoDB',
+    dependencies: ['mongodb', 'mongoose'],
+    init: async () => {
+      const mongoose = require('mongoose');
+      await mongoose.connect('mongodb://localhost:27017/safespace', {
+        useNewUrlParser: true,
+        useUnifiedTopology: true
+      });
+      
+      const PostSchema = new mongoose.Schema({
+        id: String,
+        content: String,
+        username: String,
+        timestamp: Date
+      });
+      
+      const Post = mongoose.model('Post', PostSchema);
+      
+      return {
+        getPosts: async () => {
+          return await Post.find().sort({ timestamp: -1 }).lean();
+        },
+        addPost: async (post) => {
+          return await Post.create(post);
+        }
+      };
+    }
+  },
+  redis: {
+    name: 'Redis',
+    dependencies: ['redis'],
+    init: async () => {
+      const redis = require('redis');
+      const { promisify } = require('util');
+      
+      const client = redis.createClient();
+      const getAsync = promisify(client.get).bind(client);
+      const setAsync = promisify(client.set).bind(client);
+      const keysAsync = promisify(client.keys).bind(client);
+      
+      return {
+        getPosts: async () => {
+          const keys = await keysAsync('post:*');
+          const posts = [];
+          
+          for (const key of keys) {
+            const post = JSON.parse(await getAsync(key));
+            posts.push(post);
+          }
+          
+          return posts.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        },
+        addPost: async (post) => {
+          await setAsync(\`post:\${post.id}\`, JSON.stringify(post));
+          return post;
+        }
+      };
+    }
+  },
+  memory: {
+    name: 'In-Memory (No Database)',
+    dependencies: [],
+    init: async () => {
+      const posts = [];
+      
+      return {
+        getPosts: async () => {
+          return posts;
+        },
+        addPost: async (post) => {
+          posts.push(post);
+          return post;
+        }
+      };
+    }
+  }
+};
+
+// Detect OS and install dependencies
+const detectOS = () => {
+  const platform = os.platform();
+  if (platform === 'win32') return 'Windows';
+  if (platform === 'darwin') return 'macOS';
+  if (platform === 'linux') return 'Linux';
+  return 'Unknown';
+};
+
+const installDependencies = (dependencies) => {
+  return new Promise((resolve, reject) => {
+    if (dependencies.length === 0) {
+      resolve();
+      return;
+    }
+    
+    console.log(\`Installing dependencies: \${dependencies.join(', ')}\`);
+    
+    const command = \`npm install --save \${dependencies.join(' ')}\`;
+    exec(command, (error, stdout, stderr) => {
+      if (error) {
+        console.error(\`Error installing dependencies: \${error.message}\`);
+        reject(error);
+        return;
+      }
+      
+      console.log(\`Dependencies installed successfully\`);
+      resolve();
+    });
+  });
+};
+
+// Prompt user for database choice
+const promptDatabaseChoice = () => {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+  
+  return new Promise((resolve) => {
+    console.log('Please select a database to use:');
+    Object.entries(dbAdapters).forEach(([key, adapter], index) => {
+      console.log(\`\${index + 1}. \${adapter.name}\`);
+    });
+    
+    rl.question('Enter your choice (number): ', async (answer) => {
+      const index = parseInt(answer) - 1;
+      const dbKeys = Object.keys(dbAdapters);
+      
+      if (index >= 0 && index < dbKeys.length) {
+        const selectedKey = dbKeys[index];
+        dbType = selectedKey;
+        console.log(\`Selected database: \${dbAdapters[selectedKey].name}\`);
+        
+        // Install dependencies for the selected database
+        const osType = detectOS();
+        console.log(\`Detected operating system: \${osType}\`);
+        
+        try {
+          await installDependencies(dbAdapters[selectedKey].dependencies);
+          resolve(selectedKey);
+        } catch (error) {
+          console.error('Failed to install dependencies, falling back to in-memory storage');
+          resolve('memory');
+        }
+      } else {
+        console.log('Invalid choice, falling back to in-memory storage');
+        resolve('memory');
+      }
+      
+      rl.close();
+    });
+  });
+};
+
+// API routes
 app.get('/', (req, res) => {
   res.json({
     status: 'online',
-    nodeInfo
+    nodeInfo,
+    database: dbType
   });
 });
 
@@ -377,8 +577,55 @@ app.get('/info', (req, res) => {
     wsUrl: nodeInfo.wsUrl,
     httpUrl: nodeInfo.httpUrl,
     name: nodeInfo.name,
+    database: dbType,
     clients: Array.from(clients.keys())
   });
+});
+
+// Database routes
+app.get('/api/posts', async (req, res) => {
+  try {
+    if (!db) {
+      return res.status(503).json({ error: 'Database not initialized' });
+    }
+    
+    const posts = await db.getPosts();
+    res.json(posts);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/posts', async (req, res) => {
+  try {
+    if (!db) {
+      return res.status(503).json({ error: 'Database not initialized' });
+    }
+    
+    const post = req.body;
+    if (!post.id) {
+      post.id = 'post_' + Date.now();
+    }
+    if (!post.timestamp) {
+      post.timestamp = new Date();
+    }
+    
+    const savedPost = await db.addPost(post);
+    
+    // Broadcast the new post to connected clients
+    wss.clients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify({
+          type: 'newPost',
+          post: savedPost
+        }));
+      }
+    });
+    
+    res.status(201).json(savedPost);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 wss.on('connection', (ws) => {
@@ -422,6 +669,23 @@ wss.on('connection', (ws) => {
             }));
           }
           break;
+          
+        case 'post':
+          // Store the post in the database
+          if (db) {
+            db.addPost(data.post).then(savedPost => {
+              // Broadcast to all connected clients
+              for (const client of clients.values()) {
+                if (client.readyState === WebSocket.OPEN) {
+                  client.send(JSON.stringify({
+                    type: 'newPost',
+                    post: savedPost
+                  }));
+                }
+              }
+            });
+          }
+          break;
       }
     } catch (error) {
       console.error('Error processing message:', error);
@@ -445,12 +709,38 @@ wss.on('connection', (ws) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log(\`SafeSpace Node server running on port \${PORT}\`);
-  console.log(\`Node ID: \${NODE_ID}\`);
-  console.log(\`WebSocket URL: ws://localhost:\${PORT}\`);
-  console.log(\`HTTP URL: http://localhost:\${PORT}\`);
-});`,
+// Initialize database and start server
+(async () => {
+  try {
+    // If DB_TYPE environment variable is set, use that; otherwise prompt user
+    const selectedDbType = process.env.DB_TYPE || await promptDatabaseChoice();
+    
+    console.log(\`Initializing \${dbAdapters[selectedDbType].name} database...\`);
+    db = await dbAdapters[selectedDbType].init();
+    console.log(\`Database initialized successfully: \${dbAdapters[selectedDbType].name}\`);
+    
+    server.listen(PORT, () => {
+      console.log(\`SafeSpace Node server running on port \${PORT}\`);
+      console.log(\`Node ID: \${NODE_ID}\`);
+      console.log(\`WebSocket URL: ws://localhost:\${PORT}\`);
+      console.log(\`HTTP URL: http://localhost:\${PORT}\`);
+      console.log(\`Database: \${dbAdapters[selectedDbType].name}\`);
+    });
+  } catch (error) {
+    console.error('Failed to initialize database:', error);
+    console.log('Falling back to in-memory storage');
+    
+    db = await dbAdapters.memory.init();
+    
+    server.listen(PORT, () => {
+      console.log(\`SafeSpace Node server running on port \${PORT}\`);
+      console.log(\`Node ID: \${NODE_ID}\`);
+      console.log(\`WebSocket URL: ws://localhost:\${PORT}\`);
+      console.log(\`HTTP URL: http://localhost:\${PORT}\`);
+      console.log(\`Database: In-Memory (No Database)\`);
+    });
+  }
+})();`,
       'package.json': `{
   "name": "safespace-node",
   "version": "1.0.0",
@@ -474,8 +764,25 @@ This is a node server for the SafeSpaceSocial P2P network. It helps peers discov
 1. Install Node.js if you don't have it already.
 2. Run \`npm install\` to install dependencies.
 3. Run \`npm start\` to start the server.
+   - You will be prompted to choose a database system to use.
+   - The server will automatically detect your operating system and install the necessary dependencies.
 
-By default, the server runs on port 3000. You can change this by setting the PORT environment variable.
+## Database Options
+
+The node server supports multiple database architectures:
+
+1. **SQLite** - A file-based SQL database (recommended for personal use)
+2. **MongoDB** - A NoSQL document database (requires MongoDB installed separately)
+3. **Redis** - An in-memory key-value store (requires Redis installed separately)
+4. **In-Memory** - No persistent storage, data is lost when the server restarts
+
+You can also set the database type using an environment variable:
+
+\`\`\`
+DB_TYPE=sqlite npm start
+\`\`\`
+
+Valid options are: sqlite, mongodb, redis, memory
 
 ## Connecting your SafeSpaceSocial app to your node
 
