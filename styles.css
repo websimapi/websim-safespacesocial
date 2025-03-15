@@ -31,17 +31,25 @@ body {
   color: #4a4a4a;
 }
 
-.node-status {
+.connectivity-status {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 15px;
   font-size: 14px;
 }
 
+.status-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
 .status-indicator {
+  display: inline-block;
   width: 12px;
   height: 12px;
   border-radius: 50%;
+  margin-right: 5px;
 }
 
 .connected {
@@ -168,4 +176,3 @@ body {
   border-radius: 50%;
   margin-right: 10px;
 }
-

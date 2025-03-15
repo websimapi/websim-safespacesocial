@@ -1,16 +1,9 @@
-// This file contains information about default nodes that can be used to connect to the network
+// This file now contains information about localhost node instead of default remote nodes
 window.defaultNodes = [
   {
-    id: "node_default1",
-    wsUrl: "wss://safespace-node-1.example.com",
-    httpUrl: "https://safespace-node-1.example.com",
-    name: "SafeSpace Default Node 1"
-  },
-  {
-    id: "node_default2",
-    wsUrl: "wss://safespace-node-2.example.com",
-    httpUrl: "https://safespace-node-2.example.com",
-    name: "SafeSpace Default Node 2"
+    id: "node_localhost",
+    wsUrl: "ws://localhost:3000",
+    httpUrl: "http://localhost:3000",
+    name: "Local SafeSpace Node"
   }
 ];
-

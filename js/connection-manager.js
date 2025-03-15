@@ -11,11 +11,14 @@ class ConnectionManager {
     this.onPostUpdate = null;
     this.onPeerUpdate = null;
     this.onNodeStatusChange = null;
+    this.websimConnectionStatus = 'disconnected';
+    this.databaseConnectionStatus = 'disconnected';
   }
 
   async init() {
     // Initialize the WebsimSocket connection
     this.room = new WebsimSocket();
+    this.websimConnectionStatus = 'connected';
     
     // Initialize the encryption manager
     this.encryptionManager = new MessageEncryption();
@@ -24,6 +27,7 @@ class ConnectionManager {
     // Initialize the storage manager
     this.storageManager = new StorageManager(this);
     await this.storageManager.init();
+    this.databaseConnectionStatus = 'connected';
     
     // Try to initialize P2P functionality
     const p2pInitialized = await this.p2pManager.init();
@@ -334,17 +338,7 @@ class ConnectionManager {
   prepareNodeFilesForDownload() {
     // Create a zip of the node server files
     const filesContent = {
-      'server.js': NODE_SERVER_CODE,
-      'package.json': NODE_PACKAGE_JSON,
-      'README.md': NODE_README
-    };
-    
-    return filesContent;
-  }
-}
-
-// Node server code
-const NODE_SERVER_CODE = `const WebSocket = require('ws');
+      'server.js': `const WebSocket = require('ws');
 const http = require('http');
 const express = require('express');
 const cors = require('cors');
@@ -456,10 +450,8 @@ server.listen(PORT, () => {
   console.log(\`Node ID: \${NODE_ID}\`);
   console.log(\`WebSocket URL: ws://localhost:\${PORT}\`);
   console.log(\`HTTP URL: http://localhost:\${PORT}\`);
-});`;
-
-// Package.json for the node server
-const NODE_PACKAGE_JSON = `{
+});`,
+      'package.json': `{
   "name": "safespace-node",
   "version": "1.0.0",
   "description": "Node server for SafeSpaceSocial P2P network",
@@ -472,10 +464,8 @@ const NODE_PACKAGE_JSON = `{
     "express": "^4.17.3",
     "ws": "^8.5.0"
   }
-}`;
-
-// README for the node server
-const NODE_README = `# SafeSpaceSocial Node Server
+}`,
+      'README.md': `# SafeSpaceSocial Node Server
 
 This is a node server for the SafeSpaceSocial P2P network. It helps peers discover each other and establish direct connections.
 
@@ -506,5 +496,9 @@ If you want other users to connect to your node, you'll need to make it accessib
 3. Use the HTTPS URL provided by ngrok when adding your node to SafeSpaceSocial.
 
 Note: The URL will change each time you restart ngrok unless you have a paid account.
-`;
-
+`
+    };
+    
+    return filesContent;
+  }
+}

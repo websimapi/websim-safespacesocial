@@ -6,6 +6,8 @@ function App() {
   const [posts, setPosts] = useState([]);
   const [peers, setPeers] = useState({});
   const [nodeStatuses, setNodeStatuses] = useState({});
+  const [websimStatus, setWebsimStatus] = useState('disconnected');
+  const [databaseStatus, setDatabaseStatus] = useState('disconnected');
   const [newPostContent, setNewPostContent] = useState('');
   const [newNodeInfo, setNewNodeInfo] = useState({ id: '', wsUrl: '', name: '' });
   const [addingNode, setAddingNode] = useState(false);
@@ -35,6 +37,8 @@ function App() {
       
       // Set initial node statuses
       setNodeStatuses(manager.nodeStatuses);
+      setWebsimStatus(manager.websimConnectionStatus);
+      setDatabaseStatus(manager.databaseConnectionStatus);
       
       setInitialized(true);
     };
@@ -107,20 +111,26 @@ function App() {
     <div className="container">
       <header className="app-header">
         <h1 className="app-title">SafeSpaceSocial</h1>
-        <div className="node-status">
-          {Object.entries(nodeStatuses).length > 0 ? (
-            Object.entries(nodeStatuses).map(([nodeId, status]) => (
-              <div key={nodeId}>
-                <span className={`status-indicator ${status}`}></span>
-                <span>{connectionManager.knownNodes.find(n => n.id === nodeId)?.name || nodeId}</span>
-              </div>
-            ))
-          ) : (
-            <div>
-              <span className="status-indicator disconnected"></span>
-              <span>No nodes connected</span>
+        <div className="connectivity-status">
+          {/* WebSim Status */}
+          <div className="status-item">
+            <span className={`status-indicator ${websimStatus}`}></span>
+            <span>WebSim</span>
+          </div>
+          
+          {/* Database Status */}
+          <div className="status-item">
+            <span className={`status-indicator ${databaseStatus}`}></span>
+            <span>Database</span>
+          </div>
+          
+          {/* Node Statuses */}
+          {Object.entries(nodeStatuses).map(([nodeId, status]) => (
+            <div className="status-item" key={nodeId}>
+              <span className={`status-indicator ${status}`}></span>
+              <span>{connectionManager.knownNodes.find(n => n.id === nodeId)?.name || nodeId}</span>
             </div>
-          )}
+          ))}
         </div>
       </header>
       
@@ -279,4 +289,3 @@ loadJSZip().then(() => {
     </div>
   );
 });
-
