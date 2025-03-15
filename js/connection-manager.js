@@ -480,7 +480,7 @@ const dbAdapters = {
           return posts.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
         },
         addPost: async (post) => {
-          await setAsync(\`post:\${post.id}\`, JSON.stringify(post));
+          await setAsync(`post:${post.id}`, JSON.stringify(post));
           return post;
         }
       };
@@ -521,17 +521,17 @@ const installDependencies = (dependencies) => {
       return;
     }
     
-    console.log(\`Installing dependencies: \${dependencies.join(', ')}\`);
+    console.log(`Installing dependencies: ${dependencies.join(', ')}`);
     
-    const command = \`npm install --save \${dependencies.join(' ')}\`;
+    const command = `npm install --save ${dependencies.join(' ')}`;
     exec(command, (error, stdout, stderr) => {
       if (error) {
-        console.error(\`Error installing dependencies: \${error.message}\`);
+        console.error(`Error installing dependencies: ${error.message}`);
         reject(error);
         return;
       }
       
-      console.log(\`Dependencies installed successfully\`);
+      console.log(`Dependencies installed successfully`);
       resolve();
     });
   });
@@ -547,7 +547,7 @@ const promptDatabaseChoice = () => {
   return new Promise((resolve) => {
     console.log('Please select a database to use:');
     Object.entries(dbAdapters).forEach(([key, adapter], index) => {
-      console.log(\`\${index + 1}. \${adapter.name}\`);
+      console.log(`\${index + 1}. \${adapter.name}`);
     });
     
     rl.question('Enter your choice (number): ', async (answer) => {
@@ -557,11 +557,11 @@ const promptDatabaseChoice = () => {
       if (index >= 0 && index < dbKeys.length) {
         const selectedKey = dbKeys[index];
         dbType = selectedKey;
-        console.log(\`Selected database: \${dbAdapters[selectedKey].name}\`);
+        console.log(`Selected database: \${dbAdapters[selectedKey].name}`);
         
         // Install dependencies for the selected database
         const osType = detectOS();
-        console.log(\`Detected operating system: \${osType}\`);
+        console.log(`Detected operating system: \${osType}`);
         
         try {
           await installDependencies(dbAdapters[selectedKey].dependencies);
@@ -733,16 +733,16 @@ wss.on('connection', (ws) => {
     // If DB_TYPE environment variable is set, use that; otherwise prompt user
     const selectedDbType = process.env.DB_TYPE || await promptDatabaseChoice();
     
-    console.log(\`Initializing \${dbAdapters[selectedDbType].name} database...\`);
+    console.log(`Initializing ${dbAdapters[selectedDbType].name} database...`);
     db = await dbAdapters[selectedDbType].init();
-    console.log(\`Database initialized successfully: \${dbAdapters[selectedDbType].name}\`);
+    console.log(`Database initialized successfully: ${dbAdapters[selectedDbType].name}`);
     
     server.listen(PORT, () => {
-      console.log(\`SafeSpace Node server running on port \${PORT}\`);
-      console.log(\`Node ID: \${NODE_ID}\`);
-      console.log(\`WebSocket URL: ws://localhost:\${PORT}\`);
-      console.log(\`HTTP URL: http://localhost:\${PORT}\`);
-      console.log(\`Database: \${dbAdapters[selectedDbType].name}\`);
+      console.log(`SafeSpace Node server running on port ${PORT}`);
+      console.log(`Node ID: ${NODE_ID}`);
+      console.log(`WebSocket URL: ws://localhost:${PORT}`);
+      console.log(`HTTP URL: http://localhost:${PORT}`);
+      console.log(`Database: ${dbAdapters[selectedDbType].name}`);
     });
   } catch (error) {
     console.error('Failed to initialize database:', error);
@@ -751,11 +751,11 @@ wss.on('connection', (ws) => {
     db = await dbAdapters.memory.init();
     
     server.listen(PORT, () => {
-      console.log(\`SafeSpace Node server running on port \${PORT}\`);
-      console.log(\`Node ID: \${NODE_ID}\`);
-      console.log(\`WebSocket URL: ws://localhost:\${PORT}\`);
-      console.log(\`HTTP URL: http://localhost:\${PORT}\`);
-      console.log(\`Database: In-Memory (No Database)\`);
+      console.log(`SafeSpace Node server running on port ${PORT}`);
+      console.log(`Node ID: ${NODE_ID}`);
+      console.log(`WebSocket URL: ws://localhost:${PORT}`);
+      console.log(`HTTP URL: http://localhost:${PORT}`);
+      console.log(`Database: In-Memory (No Database)`);
     });
   }
 })();
@@ -827,7 +827,6 @@ Note: The URL will change each time you restart ngrok unless you have a paid acc
     
     return filesContent;
   }
-}
 
   async loadDeadSignals() {
     try {
@@ -950,3 +949,4 @@ Note: The URL will change each time you restart ngrok unless you have a paid acc
     return signal && signal.nodeId && signal.verificationHash && 
            signal.startTime && (signal.endTime || signal.permanent);
   }
+}
